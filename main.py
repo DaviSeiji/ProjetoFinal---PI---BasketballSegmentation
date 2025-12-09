@@ -1,114 +1,141 @@
+import os
 import cv2
 import numpy as np
-from matplotlib import pyplot as plt
-import utils as ut
+import matplotlib.pyplot as plt
+from utils.utils import *
+from preproc.preproc_func import *
+from segmentacao.segmentacao_func import *
+from posproc.posproc_func import *
 
 
-def equalizando_histograma(imagem_cinza):
-    std_contraste = imagem_cinza.std()
-    min_val, max_val = imagem_cinza.min(), imagem_cinza.max()
-    amplitude = max_val - min_val
+#Teste de segmentação com HSV
+segmentadores_hsv = {
+    "HSV + Filtro": hsv_laranja,
+    "HSV + Hough": lambda img: hough_mask(hsv_laranja(img)),
+    "HSV + Otsu": hsv_otsu,
+    "HSV + Multi-Otsu": hsv_multiotsu
+}
 
-    if std_contraste < 40 and amplitude < 100:
-        print(f'Contraste muito baixo ({std_contraste:.1f}), amplitude {amplitude} → CLAHE.')
-        equalizada = ut.clahe_histograma(imagem_cinza)
+#Teste de segmentação com LAB
+segmentadores_lab = {
+    "Lab + Filtro": lab_laranja,
+    "Lab + Hough": lab_hough,
+    "Lab + Otsu": lab_otsu,
+    "Lab + Multi-Otsu": lab_multiotsu
+}
 
-    elif std_contraste < 70 and amplitude < 200:
-        print(f'Contraste moderado ({std_contraste:.1f}), amplitude {amplitude} → equalização global.')
-        equalizada = ut.equalizar_histograma(imagem_cinza)
+#Teste de segmentação com Gray
+segmentadores_gray = {
+    "Gray + Otsu": gray_otsu,
+    "Gray + Multi-Otsu": gray_multiotsu,
+    "Gray + Hough": gray_hough,
+    "Gray + Otsu + Hough": gray_otsu_hough
+}
 
-    elif std_contraste < 70:
-        print(f'Contraste moderado, mas amplitude boa ({amplitude}) → alongamento linear.')
-        equalizada = ut.alongamento_histograma(imagem_cinza)
+#Diferentes pré-processamentos testados
+preprocessamentos = {
+    "Original": lambda x: x,
+    "CLAHE": clahe,
+    "Normalize": normalize_image,
+    "Bilateral": bilateral_filter,
+    "Sharpen": sharpen_image,
+    "CLAHE + Bilateral": lambda x: bilateral_filter(clahe(x)),
+    "CLAHE + Sharpen": lambda x: sharpen_image(clahe(x)),
+    "Normalize + Sharpen": lambda x: sharpen_image(normalize_image(x))
+}
 
-    else:
-        print(f'Contraste adequado ({std_contraste:.1f}) → sem processamento.')
-        equalizada = imagem_cinza
+#Imagens e masks reais
+path_img = "data/img"
+path_mask = "data/real_masks"
 
-    return equalizada
+images = [f for f in os.listdir(path_img) if f.lower().endswith(".jpg")]
 
+if not images:
+    raise FileNotFoundError("Nenhuma imagem encontrada em data/img")
 
-def borrando_imagem(equalizada):
-    nitidez = ut.medir_nitidez(equalizada)
+resultados = {}
+melhor_por_imagem = {}
 
-    if nitidez < 50:
-        print(f"Imagem muito ruidosa → aplicando borramento forte.")
-        borrada = cv2.GaussianBlur(equalizada, (9,9), 0)
-    elif nitidez < 150:
-        print(f"Imagem levemente ruidosa → borramento médio.")
-        borrada = cv2.GaussianBlur(equalizada, (5,5), 0)
-    else:
-        print(f"Imagem nítida → borramento leve.")
-        borrada = cv2.GaussianBlur(equalizada, (3,3), 0)
-
-    return borrada
-
-
-def main():
-    qtd_imagens = 20
-
-    for i in range(qtd_imagens):
-        caminho_imagem = f'data/images/imagem{i+1}.jpg'
-        imagem = cv2.imread(caminho_imagem)
-
-        if imagem is None:
-            print(f'Erro ao carregar a imagem: {caminho_imagem}')
-            continue
-
-        imagem_cinza = ut.img_cinza(imagem)
-        histograma = ut.histograma(imagem_cinza)
-
-        equalizada = equalizando_histograma(imagem_cinza)
-        histograma_eq = ut.histograma(equalizada)
-
-        borrada = borrando_imagem(equalizada)
-        limiarizada = ut.limiarizacao_adaptativa(borrada)
-
-        # Encontra contornos
-        contornos, _ = cv2.findContours(limiarizada, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-        print(f"\nImagem {i+1}: {len(contornos)} contornos encontrados.")
-
-        # Desenhar círculos nas bolas detectadas
-        for c in contornos:
-            area = cv2.contourArea(c)
-            perimetro = cv2.arcLength(c, True)
-
-            if perimetro == 0:
-                continue
-
-            circularidade = 4 * np.pi * (area / (perimetro**2))
-
-            # Critérios para considerar uma bola
-            if area > 500 and circularidade > 0.6:
-                (x, y), raio = cv2.minEnclosingCircle(c)
-                cv2.circle(imagem, (int(x), int(y)), int(raio), (0, 255, 0), 2)
-                print(f"→ Bola detectada: área={area:.1f}, circ={circularidade:.2f}")
-
-        # Plot das etapas
-        fig, axs = plt.subplots(2, 3, figsize=(12, 8))
-
-        axs[0,0].imshow(imagem_cinza, cmap='gray')
-        axs[0,0].set_title('Original')
-
-        axs[0,1].plot(histograma)
-        axs[0,1].set_title('Histograma Original')
-
-        axs[0,2].imshow(equalizada, cmap='gray')
-        axs[0,2].set_title('Equalizada / Processada')
-
-        axs[1,0].imshow(borrada, cmap='gray')
-        axs[1,0].set_title('Borrada')
-
-        axs[1,1].imshow(limiarizada, cmap='gray')
-        axs[1,1].set_title('Limiarização Adaptativa')
-
-        axs[1,2].imshow(cv2.cvtColor(imagem, cv2.COLOR_BGR2RGB))
-        axs[1,2].set_title('Bolas Detectadas')
-
-        plt.tight_layout()
-        plt.show()
+#Salvar resultados
+def registrar(nome, valor):
+    if nome not in resultados:
+        resultados[nome] = []
+    resultados[nome].append(valor)
 
 
-if __name__ == "__main__":
-    main()
+for img_name in images:
+    img = cv2.imread(os.path.join(path_img, img_name))
+    mask_true_path = os.path.join(path_mask, img_name.replace(".jpg", ".png"))
+
+    if not os.path.exists(mask_true_path):
+        print(f"⚠ Máscara real não encontrada para {img_name}, pulando Dice.")
+        continue
+
+    mask_true = cv2.imread(mask_true_path, cv2.IMREAD_GRAYSCALE)
+
+    best_dice = -1
+    best_method = None
+    best_mask = None
+
+    #Testando HSV
+    for prep_name, prep in preprocessamentos.items():
+        img_p = prep(img)
+
+        for nome, func in segmentadores_hsv.items():
+            mask_pred = posproc_mask(func(img_p))
+            dice = dice_coefficient(mask_pred, mask_true)
+
+            registrar(f"HSV | {prep_name} | {nome}", dice)
+
+            if dice > best_dice:
+                best_dice = dice
+                best_method = f"HSV | {prep_name} | {nome}"
+                best_mask = mask_pred
+
+    #Testando LAB
+    for prep_name, prep in preprocessamentos.items():
+        img_p = prep(img)
+
+        for nome, func in segmentadores_lab.items():
+            mask_pred = posproc_mask(func(img_p))
+            dice = dice_coefficient(mask_pred, mask_true)
+
+            registrar(f"LAB | {prep_name} | {nome}", dice)
+
+            if dice > best_dice:
+                best_dice = dice
+                best_method = f"LAB | {prep_name} | {nome}"
+                best_mask = mask_pred
+
+    #Testando GRAY
+    for prep_name, prep in preprocessamentos.items():
+        img_p = prep(img)
+
+        for nome, func in segmentadores_gray.items():
+            mask_pred = posproc_mask(func(img_p))
+            dice = dice_coefficient(mask_pred, mask_true)
+
+            registrar(f"GRAY | {prep_name} | {nome}", dice)
+
+            if dice > best_dice:
+                best_dice = dice
+                best_method = f"GRAY | {prep_name} | {nome}"
+                best_mask = mask_pred
+
+    melhor_por_imagem[img_name] = (best_dice, best_method, best_mask, img, mask_true)
+    print(f"{img_name}: melhor Dice = {best_dice:.4f} ({best_method})")
+
+#Dice finais dos métodos
+print("MÉDIA FINAL DOS DICE:")
+ranking = []
+
+for metodo, valores in resultados.items():
+    media = sum(valores) / len(valores)
+    ranking.append((metodo, media))
+
+ranking.sort(key=lambda x: x[1], reverse=True)
+
+for metodo, media in ranking:
+    print(f"{metodo:<50} → MÉDIA DICE = {media:.4f}")
+
+print("\n==============================\n")
