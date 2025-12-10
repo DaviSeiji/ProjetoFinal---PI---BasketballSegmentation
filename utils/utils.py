@@ -33,3 +33,24 @@ def get_bbox(mask):
         if circularidade(c) < MIN_CIRC: continue
         bboxes.append(cv2.boundingRect(c))
     return bboxes
+
+def desenhar_bbox(img, mask):
+    if mask is None:
+        return img
+
+    ys, xs = np.where(mask > 0)
+
+    xmin, xmax = xs.min(), xs.max()
+    ymin, ymax = ys.min(), ys.max()
+
+    img_bbox = img.copy()
+    img_bbox = cv2.rectangle(
+        img_bbox,
+        (xmin, ymin),
+        (xmax, ymax),
+        color=(255, 0, 0),
+        thickness=3
+    )
+
+    return img_bbox
+
